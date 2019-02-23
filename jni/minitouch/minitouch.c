@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include <libevdev.h>
 
@@ -313,8 +314,8 @@ static int type_a_commit(internal_state_t* state)
         if (state->has_pressure)
           WRITE_EVENT(state, EV_ABS, ABS_MT_PRESSURE, state->contacts[contact].pressure);
 
-        WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, state->contacts[contact].x);
-        WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, state->contacts[contact].y);
+        if (state->contacts[contact].x != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, state->contacts[contact].x);
+        if (state->contacts[contact].y != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, state->contacts[contact].y);
 
         WRITE_EVENT(state, EV_SYN, SYN_MT_REPORT, 0);
 
@@ -335,8 +336,8 @@ static int type_a_commit(internal_state_t* state)
         if (state->has_pressure)
           WRITE_EVENT(state, EV_ABS, ABS_MT_PRESSURE, state->contacts[contact].pressure);
 
-        WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, state->contacts[contact].x);
-        WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, state->contacts[contact].y);
+        if (state->contacts[contact].x != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, state->contacts[contact].x);
+        if (state->contacts[contact].y != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, state->contacts[contact].y);
 
         WRITE_EVENT(state, EV_SYN, SYN_MT_REPORT, 0);
         break;
@@ -488,8 +489,8 @@ static int type_b_touch_down(internal_state_t* state, int contact, int x, int y,
   if (state->has_pressure)
     WRITE_EVENT(state, EV_ABS, ABS_MT_PRESSURE, pressure);
 
-  WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, x);
-  WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, y);
+  if (x != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, x);
+  if (y != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, y);
 
   return 1;
 }
@@ -512,8 +513,8 @@ static int type_b_touch_move(internal_state_t* state, int contact, int x, int y,
   if (state->has_pressure)
     WRITE_EVENT(state, EV_ABS, ABS_MT_PRESSURE, pressure);
 
-  WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, x);
-  WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, y);
+  if (x != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_X, x);
+  if (y != -1) WRITE_EVENT(state, EV_ABS, ABS_MT_POSITION_Y, y);
 
   return 1;
 }
@@ -601,27 +602,43 @@ static int commit(internal_state_t* state)
 
 static int start_server(char* sockname)
 {
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd;
+  if (sockname[0] == ':') {
+    fd = socket(AF_INET, SOCK_STREAM, 0);
 
-  if (fd < 0)
-  {
-    perror("creating socket");
-    return fd;
+    if (fd < 0) {
+      return fd;
+    }
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    int port = atoi((char*)sockname + 1);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    addr.sin_port = htons(port);
+    if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0)
+         return -1;
+  } else {
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+    if (fd < 0)
+    {
+      perror("creating socket");
+      return fd;
+    }
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(&addr.sun_path[1], sockname, strlen(sockname));
+
+    if (bind(fd, (struct sockaddr*) &addr,
+      sizeof(sa_family_t) + strlen(sockname) + 1) < 0)
+    {
+      perror("binding socket");
+      close(fd);
+      return -1;
+    }
   }
-
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  strncpy(&addr.sun_path[1], sockname, strlen(sockname));
-
-  if (bind(fd, (struct sockaddr*) &addr,
-    sizeof(sa_family_t) + strlen(sockname) + 1) < 0)
-  {
-    perror("binding socket");
-    close(fd);
-    return -1;
-  }
-
   listen(fd, 1);
 
   return fd;
@@ -912,3 +929,4 @@ int main(int argc, char* argv[])
 
   return EXIT_SUCCESS;
 }
+
